@@ -1,0 +1,11 @@
+# 服务器配置
+server:
+  port: 8080
+
+# 微信公众号 OAuth 配置（禁止硬编码，必须从 yml 读取）
+wx:
+  oauth:
+    # 公众号 AppID - 请替换为实际的 AppID
+    app-id: ${WX_APP_ID:wxa43df98d07aceb50}
+    # 公众号 AppSecret - 请替换为实际的 AppSecret
+    app-secret: ${WX_APP_SECRET:104613738eaba298a9b5df6e3f211e34}
