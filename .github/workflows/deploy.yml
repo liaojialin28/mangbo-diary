@@ -126,7 +126,7 @@ jobs:
           key: ${{ secrets.SERVER_PRIVATE_KEY }}
           port: 22
           timeout: 120s
-          source: "target/wx-oauth-login.jar"
+          source: "target/wx-oauth-login-1.0.0.jar"
           target: "/tmp/"
           overwrite: true
           strip_components: 1
@@ -144,7 +144,7 @@ jobs:
           script: |
             set -e
 
-            JAR_PATH="/tmp/wx-oauth-login.jar"
+            JAR_PATH="/tmp/wx-oauth-login-1.0.0.jar"
             CONTAINER_NAME="wx-oauth-login"
             NETWORK_NAME="app-net"
 
