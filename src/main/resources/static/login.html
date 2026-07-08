@@ -136,9 +136,9 @@
 
         <div id="btnGroup" class="btn-group">
             <!-- 静默登录，跳转后端授权入口，携带scope -->
-            <a id="btnSilent" href="/api/wx/login?scope=snsapi_base" class="btn-wx btn-silent">静默自动登录</a>
+            <a id="btnSilent" href="/wx/oauth/login?scope=snsapi_base" class="btn-wx btn-silent">静默自动登录</a>
             <!-- 显式授权登录 -->
-            <a id="btnAuth" href="/api/wx/login?scope=snsapi_userinfo" class="btn-wx btn-auth">授权登录</a>
+            <a id="btnAuth" href="/wx/oauth/login?scope=snsapi_userinfo" class="btn-wx btn-auth">授权登录</a>
         </div>
 
         <div id="userInfo" class="user-info">
@@ -161,7 +161,7 @@
 <script>
     (function() {
         // 后端登录成功后跳转回当前页面地址
-        const PAGE_URL = "https://mangbo.xyz/gzhwy_backend/wx-oauth-login/static/login.html";
+        const PAGE_URL = "https://mangbo.xyz/login.html";
 
         // 工具：获取url参数
         function getUrlParam(name) {
