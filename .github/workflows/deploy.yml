@@ -24,11 +24,11 @@ jobs:
           cache: "maven"
 
       # 3. Maven 编译打包跳过测试
-      - name: 编译打包项目
+      - name: 编译打包
         run: mvn -B clean package -DskipTests
 
       # 4. SSH连通性预检
-      - name: SSH 服务器连通预检
+      - name: SSH 连通性预检
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -39,12 +39,12 @@ jobs:
           command_timeout: 60s
           script: |
             set -e
-            echo "当前登录用户: $(whoami)"
-            echo "服务器主机名: $(hostname)"
-            echo "Docker版本: $(docker --version)"
+            echo "whoami: $(whoami)"
+            echo "hostname: $(hostname)"
+            docker --version
 
       # 5. 远端清理旧容器、旧jar包
-      - name: 远端清理旧容器与旧jar包
+      - name: 远端清理旧jar
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -52,48 +52,73 @@ jobs:
           key: ${{ secrets.SERVER_PRIVATE_KEY }}
           port: 22
           script: |
-            set -e
+
             CONTAINER_NAME="wx-oauth-login"
             JAR_PATH="/tmp/wx-oauth-login.jar"
 
-            echo "========== 开始清理旧资源诊断 =========="
+            echo "========== 开始诊断和清理 =========="
+
+            # --- 诊断：检查文件状态 ---
             if [ -e "$JAR_PATH" ] || [ -L "$JAR_PATH" ]; then
-              echo ">>> 检测到旧jar文件，文件详情:"
+              echo ">>> 发现残留目标，详细信息:"
               ls -la "$JAR_PATH"
               file "$JAR_PATH"
-              lsattr "$JAR_PATH" 2>/dev/null || echo "lsattr 工具不存在"
-              lsof "$JAR_PATH" 2>/dev/null || echo "无进程占用文件"
+              # 检查是否有 immutable 属性 (chattr)
+              lsattr "$JAR_PATH" 2>/dev/null || echo "lsattr 不可用"
+              # 检查是否有进程占用该文件/目录
+              lsof "$JAR_PATH" 2>/dev/null || echo "lsof 无结果"
               docker ps --filter "name=$CONTAINER_NAME" --format "{{.ID}} {{.Names}} {{.Status}}"
             else
-              echo ">>> /tmp 目录无旧jar，无需清理文件"
+              echo ">>> 目标位置干净，无需清理"
+              exit 0
             fi
 
-            # 停止并删除旧容器
+            # --- 步骤1: 强制停止并移除所有相关容器 ---
             echo ""
-            echo ">>> 停止并移除旧Docker容器"
+            echo ">>> 步骤1: 移除 Docker 容器..."
             docker stop "$CONTAINER_NAME" 2>/dev/null || true
             sleep 2
             docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
             sleep 2
-            echo "旧容器清理完成"
+            echo "容器处理完成"
 
-            # 多层容错删除jar
-            if [ -e "$JAR_PATH" ]; then
-              echo ""
-              echo ">>> 尝试删除旧jar包"
-              rm -rf "$JAR_PATH" 2>/dev/null && echo "普通删除成功" && exit 0
-              sudo chattr -i "$JAR_PATH" 2>/dev/null || true
-              rm -rf "$JAR_PATH" 2>/dev/null && echo "解除只读属性删除成功" && exit 0
-              sudo rm -rf "$JAR_PATH" 2>/dev/null && echo "sudo强制删除成功" && exit 0
+            # 再次检查是否还有进程占用
+            lsof "$JAR_PATH" 2>/dev/null && echo "警告: 仍有进程占用!" || echo "无进程占用"
 
-              echo "ERROR: jar文件删除全部方式失败，请手动登录服务器排查"
-              ls -laZ "$JAR_PATH"
-              stat "$JAR_PATH"
-              exit 1
-            fi
+            # --- 步骤2: 尝试普通删除 ---
+            echo ""
+            echo ">>> 步骤2: 尝试普通删除..."
+            rm -rf "$JAR_PATH" 2>/dev/null && { echo "普通删除成功"; exit 0; }
 
-      # 6. SCP上传jar并重命名为 wx-oauth-login.jar
-      - name: 传输jar包到服务器 /tmp
+            # --- 步骤3: 尝试解除 immutable 属性再删 ---
+            echo "普通删除失败，尝试解除 immutable 属性..."
+            sudo chattr -i "$JAR_PATH" 2>/dev/null || chattr -i "$JAR_PATH" 2>/dev/null || echo "chattr 不可用或无权限"
+            rm -rf "$JAR_PATH" 2>/dev/null && { echo "解除 immutable 后删除成功"; exit 0; }
+
+            # --- 步骤4: 使用 sudo 删除 ---
+            echo ""
+            echo ">>> 步骤4: 尝试 sudo 删除..."
+            sudo rm -rf "$JAR_PATH" 2>/dev/null && { echo "sudo 删除成功"; exit 0; }
+
+            # --- 全部失败：输出详细诊断并退出 ---
+            echo ""
+            echo "============================================="
+            echo "ERROR: 所有删除方式均失败！请手动排查:"
+            echo "============================================="
+            echo "文件信息:"
+            ls -laZ "$JAR_PATH" 2>/dev/null   # 包含 SELinux 上下文
+            stat "$JAR_PATH"
+            echo ""
+            echo "请在服务器上手动执行以下命令排查:"
+            echo "  1. ls -la /tmp/wx-oauth-login.jar"
+            echo "  2. lsattr /tmp/wx-oauth-login.jar"
+            echo "  3. lsof /tmp/wx-oauth-login.jar"
+            echo "  4. getenforce  (查看 SELinux 状态)"
+            echo "  手动解决后重新部署即可。"
+            exit 1
+
+      # 6. SCP上传jar
+      - name: 传输 JAR 到 CentOS /tmp
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -106,8 +131,8 @@ jobs:
           overwrite: true
           strip_components: 1
 
-      # 7. 启动容器，挂载 /app.jar 改为 wx-oauth-login.jar
-      - name: 服务器启动微信OAuth容器
+      # 7. 启动容器
+      - name: 在 CentOS 上重启服务
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -116,38 +141,33 @@ jobs:
           port: 22
           timeout: 120s
           command_timeout: 10m
-          debug: true
           script: |
+            set -e
+
             JAR_PATH="/tmp/wx-oauth-login.jar"
             CONTAINER_NAME="wx-oauth-login"
             NETWORK_NAME="app-net"
 
-            echo "【1】校验jar文件是否存在"
             test -f "$JAR_PATH"
-            echo "test -f 执行完毕，返回码：$?"
-
-            echo "【2】打印jar文件信息"
             ls -lh "$JAR_PATH"
             sha256sum "$JAR_PATH"
 
-            echo "【3】清理旧容器"
+            # 容错删除旧容器
             docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
-            echo "【4】创建docker网络"
+            # 使用自定义网络（替代 --link）
             docker network create "$NETWORK_NAME" >/dev/null 2>&1 || true
 
-            echo "【5】启动容器"
             docker run -d \
               --name "$CONTAINER_NAME" \
-              --restart=unless-stopped \
+              --restart=always \
               --network "$NETWORK_NAME" \
               -e TZ=Asia/Shanghai \
               -p 8082:8080 \
-              -v "$JAR_PATH:/wx-oauth-login.jar:ro" \
-              -e WX_APP_ID=${{ secrets.WX_APP_ID }} \
-              -e WX_APP_SECRET=${{ secrets.WX_APP_SECRET }} \
+              -v "$JAR_PATH:/app.jar:ro" \
+              -e WX_APP_ID='${{ secrets.WX_APP_ID }}' \
+              -e WX_APP_SECRET='${{ secrets.WX_APP_SECRET }}' \
               openjdk:11-jdk \
               java -jar /app.jar
 
-            echo "【6】查看运行容器"
             docker ps --filter "name=$CONTAINER_NAME"
