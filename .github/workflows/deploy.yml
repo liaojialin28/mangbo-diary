@@ -1,0 +1,152 @@
+name: 微信OAuth服务自动部署到CentOS云服务器
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      # 1. 拉取仓库代码
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. 配置JDK11 Maven缓存
+      - name: 设置 JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: "11"
+          distribution: "temurin"
+          cache: "maven"
+
+      # 3. Maven 编译打包跳过测试
+      - name: 编译打包项目
+        run: mvn -B clean package -DskipTests
+
+      # 4. SSH连通性预检
+      - name: SSH 服务器连通预检
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_PRIVATE_KEY }}
+          port: 22
+          timeout: 60s
+          command_timeout: 60s
+          script: |
+            set -e
+            echo "当前登录用户: $(whoami)"
+            echo "服务器主机名: $(hostname)"
+            echo "Docker版本: $(docker --version)"
+
+      # 5. 远端清理旧容器、旧jar包
+      - name: 远端清理旧容器与旧jar包
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+            CONTAINER_NAME="wx-oauth-login"
+            JAR_PATH="/tmp/wx-oauth-login.jar"
+
+            echo "========== 开始清理旧资源诊断 =========="
+            if [ -e "$JAR_PATH" ] || [ -L "$JAR_PATH" ]; then
+              echo ">>> 检测到旧jar文件，文件详情:"
+              ls -la "$JAR_PATH"
+              file "$JAR_PATH"
+              lsattr "$JAR_PATH" 2>/dev/null || echo "lsattr 工具不存在"
+              lsof "$JAR_PATH" 2>/dev/null || echo "无进程占用文件"
+              docker ps --filter "name=$CONTAINER_NAME" --format "{{.ID}} {{.Names}} {{.Status}}"
+            else
+              echo ">>> /tmp 目录无旧jar，无需清理文件"
+            fi
+
+            # 停止并删除旧容器
+            echo ""
+            echo ">>> 停止并移除旧Docker容器"
+            docker stop "$CONTAINER_NAME" 2>/dev/null || true
+            sleep 2
+            docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+            sleep 2
+            echo "旧容器清理完成"
+
+            # 多层容错删除jar
+            if [ -e "$JAR_PATH" ]; then
+              echo ""
+              echo ">>> 尝试删除旧jar包"
+              rm -rf "$JAR_PATH" 2>/dev/null && echo "普通删除成功" && exit 0
+              sudo chattr -i "$JAR_PATH" 2>/dev/null || true
+              rm -rf "$JAR_PATH" 2>/dev/null && echo "解除只读属性删除成功" && exit 0
+              sudo rm -rf "$JAR_PATH" 2>/dev/null && echo "sudo强制删除成功" && exit 0
+
+              echo "ERROR: jar文件删除全部方式失败，请手动登录服务器排查"
+              ls -laZ "$JAR_PATH"
+              stat "$JAR_PATH"
+              exit 1
+            fi
+
+      # 6. SCP上传jar并重命名为 wx-oauth-login.jar
+      - name: 传输jar包到服务器 /tmp
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_PRIVATE_KEY }}
+          port: 22
+          timeout: 120s
+          source: "target/*.jar"
+          target: "/tmp/wx-oauth-login.jar"
+          overwrite: true
+          strip_components: 1
+
+      # 7. 启动容器，挂载 /app.jar 改为 wx-oauth-login.jar
+      - name: 服务器启动微信OAuth容器
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_PRIVATE_KEY }}
+          port: 22
+          timeout: 120s
+          command_timeout: 10m
+          script: |
+            set -e
+            JAR_PATH="/tmp/wx-oauth-login.jar"
+            CONTAINER_NAME="wx-oauth-login"
+            NETWORK_NAME="app-net"
+
+            # 校验文件上传完整
+            test -f "$JAR_PATH"
+            echo "jar文件信息:"
+            ls -lh "$JAR_PATH"
+            sha256sum "$JAR_PATH"
+
+            # 兜底删除残留容器
+            docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+            # 创建业务网络，不存在则创建
+            docker network create "$NETWORK_NAME" >/dev/null 2>&1 || true
+
+            # 启动容器
+            docker run -d \
+              --name "$CONTAINER_NAME" \
+              --restart=unless-stopped \
+              --network "$NETWORK_NAME" \
+              -e TZ=Asia/Shanghai \
+              -p 8082:8080 \
+              -v "$JAR_PATH:/wx-oauth-login.jar:ro" \
+              # 仅注入敏感密钥，固定页面地址写在yml无需传参
+              -e WX_APP_ID=${{ secrets.WX_APP_ID }} \
+              -e WX_APP_SECRET=${{ secrets.WX_APP_SECRET }} \
+              eclipse-temurin:11-jre-alpine \
+              java -XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0 -jar /wx-oauth-login.jar
+
+            # 打印运行中容器列表确认启动成功
+            echo "容器启动完成，当前运行容器:"
+            docker ps --filter "name=$CONTAINER_NAME"
