@@ -116,6 +116,8 @@ jobs:
           port: 22
           timeout: 120s
           command_timeout: 10m
+          # 开启SSH调试，打印握手、命令输出详情
+          debug: true
           script: |
             set -e
             JAR_PATH="/tmp/wx-oauth-login.jar"
