@@ -8,8 +8,8 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn clean package -DskipTests -B
 
-# 第二阶段：运行 JRE（精简镜像）
-FROM openjdk:11-jre-slim
+# 第二阶段：运行 JRE（官方推荐 eclipse-temurin，替代已废弃 openjdk 镜像）
+FROM eclipse-temurin:11-jre-alpine
 WORKDIR /app
 # 从构建阶段复制 jar 包
 COPY --from=builder /app/target/*.jar wx-oauth.jar
