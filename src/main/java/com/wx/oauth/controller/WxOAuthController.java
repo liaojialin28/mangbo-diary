@@ -87,7 +87,7 @@ public class WxOAuthController {
 
         try {
             // 静默授权，如需头像昵称改为 WxOauthConstant.SCOPE_USERINFO
-            LoginVO loginVO = wxOauthService.login(code, WxOauthConstant.SCOPE_BASE);
+            LoginVO loginVO = wxOauthService.login(code, WxOauthConstant.SCOPE_USERINFO);
             log.info("[微信回调接口] code登录成功 openid={}, token={}", loginVO.getOpenid(), loginVO.getToken());
 
             // 拼接参数带回前端页面
