@@ -45,7 +45,7 @@ jobs:
 
       # 5. 远端清理旧容器、旧jar包
       - name: 远端清理旧容器与旧jar包
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
@@ -101,8 +101,8 @@ jobs:
           key: ${{ secrets.SERVER_PRIVATE_KEY }}
           port: 22
           timeout: 120s
-          source: "target/*.jar"
-          target: "/tmp/wx-oauth-login.jar"
+          source: "target/wx-oauth-login.jar"
+          target: "/tmp/"
           overwrite: true
           strip_components: 1
 
@@ -146,9 +146,8 @@ jobs:
               -v "$JAR_PATH:/wx-oauth-login.jar:ro" \
               -e WX_APP_ID=${{ secrets.WX_APP_ID }} \
               -e WX_APP_SECRET=${{ secrets.WX_APP_SECRET }} \
-              eclipse-temurin:11-jre-alpine \
-              java -XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0 -jar /wx-oauth-login.jar
-            echo "docker run 执行完毕，返回码：$?"
+              openjdk:11-jdk \
+              java -jar /app.jar
 
             echo "【6】查看运行容器"
             docker ps --filter "name=$CONTAINER_NAME"
