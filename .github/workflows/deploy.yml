@@ -116,26 +116,27 @@ jobs:
           port: 22
           timeout: 120s
           command_timeout: 10m
-          # 开启SSH调试，打印握手、命令输出详情
           debug: true
           script: |
-            set -e
             JAR_PATH="/tmp/wx-oauth-login.jar"
             CONTAINER_NAME="wx-oauth-login"
             NETWORK_NAME="app-net"
 
-            # 校验文件上传完整
+            echo "【1】校验jar文件是否存在"
             test -f "$JAR_PATH"
-            echo "jar文件信息:"
+            echo "test -f 执行完毕，返回码：$?"
+
+            echo "【2】打印jar文件信息"
             ls -lh "$JAR_PATH"
             sha256sum "$JAR_PATH"
 
-            # 兜底删除残留容器
+            echo "【3】清理旧容器"
             docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-            # 创建业务网络，不存在则创建
+
+            echo "【4】创建docker网络"
             docker network create "$NETWORK_NAME" >/dev/null 2>&1 || true
 
-            # 启动容器
+            echo "【5】启动容器"
             docker run -d \
               --name "$CONTAINER_NAME" \
               --restart=unless-stopped \
@@ -143,12 +144,11 @@ jobs:
               -e TZ=Asia/Shanghai \
               -p 8082:8080 \
               -v "$JAR_PATH:/wx-oauth-login.jar:ro" \
-              # 仅注入敏感密钥，固定页面地址写在yml无需传参
               -e WX_APP_ID=${{ secrets.WX_APP_ID }} \
               -e WX_APP_SECRET=${{ secrets.WX_APP_SECRET }} \
               eclipse-temurin:11-jre-alpine \
               java -XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0 -jar /wx-oauth-login.jar
+            echo "docker run 执行完毕，返回码：$?"
 
-            # 打印运行中容器列表确认启动成功
-            echo "容器启动完成，当前运行容器:"
+            echo "【6】查看运行容器"
             docker ps --filter "name=$CONTAINER_NAME"
