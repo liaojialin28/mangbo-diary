@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/wx")
+@RequestMapping("/wx/oauth")
 public class WxOAuthController {
 
     @Resource

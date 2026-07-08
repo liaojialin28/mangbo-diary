@@ -10,7 +10,7 @@ wx:
     # 公众号 AppSecret - 请替换为实际的 AppSecret
     app-secret: ${WX_APP_SECRET:123213}
     # 微信回调后端接口（redirect_uri）
-    redirectUrl: https://mangbo.xyz/api/wx/callback
+    redirectUrl: https://mangbo.xyz/wx/oauth/callback
     # 登录成功跳转的静态登录页面
-    successPage: https://mangbo.xyz/gzhwy_backend/wx-oauth-login/static/login.html
+    successPage: https://mangbo.xyz/login.html
 
