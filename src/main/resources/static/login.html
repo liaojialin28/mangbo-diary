@@ -2,11 +2,9 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <!-- 移动端适配，禁止缩放 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>微信公众号登录</title>
     <style>
-        /* 全局样式重置 */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
@@ -45,7 +43,6 @@
             margin-bottom: 12px;
         }
         .logo-text { color: #333; font-size: 18px; font-weight: 600; }
-        /* 按钮样式 */
         .btn-group { display: flex; flex-direction: column; gap: 14px; }
         .btn-wx {
             display: block;
@@ -69,7 +66,6 @@
             border: none;
         }
         .btn-auth:hover { background: #06ad56; }
-        /* 用户信息展示区 */
         .user-info { display: none; }
         .user-info.show { display: block; }
         .avatar {
@@ -96,9 +92,7 @@
         .nickname { font-size: 18px; font-weight: 600; color: #333; margin-bottom: 6px; }
         .openid { font-size: 12px; color: #999; word-break: break-all; margin-bottom: 8px; }
         .login-tip { font-size: 13px; color: #07c160; }
-        /* 隐藏按钮区域 */
         .hidden { display: none !important; }
-        /* 提示框 */
         .alert-overlay {
             position: fixed;
             top: 0; left: 0;
@@ -135,19 +129,18 @@
 <body>
 <div class="container">
     <div class="card">
-        <!-- Logo 区域 -->
         <div class="logo-area">
             <div class="logo-icon">微</div>
             <div class="logo-text">微信账号登录</div>
         </div>
 
-        <!-- 登录按钮组 -->
         <div id="btnGroup" class="btn-group">
-            <a id="btnSilent" href="#" class="btn-wx btn-silent">静默自动登录</a>
-            <a id="btnAuth" href="#" class="btn-wx btn-auth">授权登录</a>
+            <!-- 静默登录，跳转后端授权入口，携带scope -->
+            <a id="btnSilent" href="/api/wx/login?scope=snsapi_base" class="btn-wx btn-silent">静默自动登录</a>
+            <!-- 显式授权登录 -->
+            <a id="btnAuth" href="/api/wx/login?scope=snsapi_userinfo" class="btn-wx btn-auth">授权登录</a>
         </div>
 
-        <!-- 用户信息展示区 -->
         <div id="userInfo" class="user-info">
             <div id="avatarArea"></div>
             <div id="nicknameDisplay" class="nickname"></div>
@@ -157,7 +150,6 @@
     </div>
 </div>
 
-<!-- 提示框 -->
 <div id="alertOverlay" class="alert-overlay">
     <div class="alert-box">
         <div id="alertTitle" class="alert-title">提示</div>
@@ -167,156 +159,79 @@
 </div>
 
 <script>
-(function() {
-    // ==================== 配置项 ====================
-    /** 公众号 AppID - 请替换为实际的 AppID */
-    var APP_ID = '${wxa43df98d07aceb50}';
-    /** 回调页面完整地址（需 URL 编码） */
-    var REDIRECT_URI = encodeURIComponent(window.location.href.split('?')[0]);
-    /** 固定 state 参数 */
-    var STATE = 'wxLogin';
-    /** 后端登录接口地址 */
-    var LOGIN_API = '/wx/oauth/login';
+    (function() {
+        // 后端登录成功后跳转回当前页面地址
+        const PAGE_URL = "https://mangbo.xyz/gzhwy_backend/wx-oauth-login/static/login.html";
 
-    // ==================== 工具函数 ====================
+        // 工具：获取url参数
+        function getUrlParam(name) {
+            const reg = new RegExp('(^|&)' + name + '=([^&]*)(&|$)');
+            const r = window.location.search.substr(1).match(reg);
+            return r ? decodeURIComponent(r[2]) : null;
+        }
 
-    /**
-     * 拼接微信 OAuth2 授权地址
-     * @param {string} scope - 授权作用域：snsapi_base 或 snsapi_userinfo
-     * @returns {string} 完整的微信授权链接
-     */
-    function getAuthUrl(scope) {
-        return 'https://open.weixin.qq.com/connect/oauth2/authorize' +
-               '?appid=' + APP_ID +
-               '&redirect_uri=' + REDIRECT_URI +
-               '&response_type=code' +
-               '&scope=' + scope +
-               '&state=' + STATE +
-               '#wechat_redirect';
-    }
+        function showAlert(msg) {
+            document.getElementById('alertMsg').textContent = msg;
+            document.getElementById('alertOverlay').classList.add('show');
+        }
+        window.hideAlert = function() {
+            document.getElementById('alertOverlay').classList.remove('show');
+        }
 
-    /**
-     * 从 URL 参数中获取指定参数值
-     * @param {string} name - 参数名
-     * @returns {string|null} 参数值
-     */
-    function getUrlParam(name) {
-        var reg = new RegExp('(^|&)' + name + '=([^&]*)(&|$)');
-        var r = window.location.search.substr(1).match(reg);
-        return r ? decodeURIComponent(r[2]) : null;
-    }
+        // 判断微信环境
+        function isWechatBrowser() {
+            const ua = navigator.userAgent.toLowerCase();
+            return ua.indexOf('micromessenger') !== -1;
+        }
 
-    /**
-     * 显示自定义提示框
-     * @param {string} msg - 提示内容
-     */
-    function showAlert(msg) {
-        document.getElementById('alertMsg').textContent = msg;
-        document.getElementById('alertOverlay').classList.add('show');
-    }
+        // 渲染登录成功用户信息
+        function renderUserInfo(token, openid, nickname, headimgurl) {
+            document.getElementById('btnGroup').classList.add('hidden');
+            const avatarArea = document.getElementById('avatarArea');
+            if (headimgurl) {
+                avatarArea.innerHTML = `<img src="${headimgurl}" alt="头像" class="avatar">`;
+            } else {
+                avatarArea.innerHTML = `<div class="avatar-placeholder">?</div>`;
+            }
+            document.getElementById('nicknameDisplay').textContent = nickname || "微信用户";
+            document.getElementById('openidDisplay').textContent = "ID: " + openid.substring(0,12) + "...";
+            localStorage.setItem("wx_login_token", token);
+            localStorage.setItem("wx_openid", openid);
+            document.getElementById('userInfo').classList.add('show');
+        }
 
-    /** 隐藏提示框 */
-    function hideAlert() {
-        document.getElementById('alertOverlay').classList.remove('show');
-    }
-    // 暴露到全局供 HTML onclick 调用
-    window.hideAlert = hideAlert;
+        function init() {
+            // 非微信浏览器提示
+            if (!isWechatBrowser()) {
+                showAlert("请在微信客户端内打开此页面");
+                return;
+            }
 
-    // ==================== 核心逻辑 ====================
+            // 获取后端回调带回的token、错误信息
+            const token = getUrlParam("token");
+            const openid = getUrlParam("openid");
+            const nickname = getUrlParam("nickname");
+            const headimgurl = getUrlParam("headimgurl");
+            const err = getUrlParam("err");
 
-    /**
-     * 判断是否为微信内置浏览器
-     * 通过 UA 特征检测 MicroMessenger 关键字
-     */
-    function isWechatBrowser() {
-        var ua = navigator.userAgent.toLowerCase();
-        return ua.indexOf('micromessenger') !== -1;
-    }
+            // 授权失败弹窗
+            if (err) {
+                showAlert(err);
+                return;
+            }
 
-    /**
-     * 处理微信回调后的登录请求
-     * 携带 code 和 scope 调用后端接口完成登录
-     */
-    function handleCallback(code, scope) {
-        fetch(LOGIN_API + '?code=' + encodeURIComponent(code) + '&scope=' + encodeURIComponent(scope))
-            .then(function(response) { return response.json(); })
-            .then(function(result) {
-                if (result.code === 200 && result.data) {
-                    showUserInfo(result.data);
-                } else {
-                    showAlert(result.msg || '登录失败，请重试');
-                }
-            })
-            .catch(function(err) {
-                showAlert('网络错误：' + err.message);
-            });
-    }
+            // 登录成功，展示用户信息
+            if (token && openid) {
+                renderUserInfo(token, openid, nickname, headimgurl);
+            }
+        }
 
-    /**
-     * 展示用户登录成功信息
-     * @param {Object} data - 后端返回的 LoginVO 数据
-     */
-    function showUserInfo(data) {
-        // 隐藏登录按钮
-        document.getElementById('btnGroup').classList.add('hidden');
-
-        // 设置头像（有头像显示图片，无则显示占位符）
-        var avatarArea = document.getElementById('avatarArea');
-        if (data.headimgurl && data.headimgurl.length > 0) {
-            avatarArea.innerHTML = '<img src="' + data.headimgurl + '" alt="头像" class="avatar">';
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
         } else {
-            avatarArea.innerHTML = '<div class="avatar-placeholder">?</div>';
+            init();
         }
-
-        // 设置昵称
-        document.getElementById('nicknameDisplay').textContent =
-            (data.nickname && data.nickname.length > 0) ? data.nickname : '微信用户';
-
-        // 设置 openid（截断展示）
-        document.getElementById('openidDisplay').textContent =
-            'ID: ' + (data.openid ? data.openid.substring(0, 12) + '...' : '');
-
-        // 存储登录 token 到 localStorage
-        if (data.token) {
-            localStorage.setItem('wx_login_token', data.token);
-            localStorage.setItem('wx_openid', data.openid);
-        }
-
-        // 显示用户信息区域
-        document.getElementById('userInfo').classList.add('show');
-    }
-
-    // ==================== 页面初始化 ====================
-
-    function init() {
-        // 1. 环境检测：非微信浏览器给出提示
-        if (!isWechatBrowser()) {
-            showAlert('请在微信客户端内打开此页面');
-            return;
-        }
-
-        // 2. 给两个登录按钮赋值授权链接
-        document.getElementById('btnSilent').href = getAuthUrl('snsapi_base');
-        document.getElementById('btnAuth').href = getAuthUrl('snsapi_userinfo');
-
-        // 3. 检测 URL 中是否携带回调 code
-        var code = getUrlParam('code');
-        var scope = getUrlParam('scope') || getUrlParam('state');
-
-        if (code) {
-            // 有 code 说明是微信回调，自动发起后端登录
-            handleCallback(code, scope || 'snsapi_base');
-        }
-        // 无 code 则等待用户点击按钮手动触发授权
-    }
-
-    // DOM 加载完成后执行初始化
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-})();
+    })();
 </script>
 </body>
 </html>
